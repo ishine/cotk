@@ -1,37 +1,89 @@
 """Dataloader for language generation"""
-from collections import Counter
-from itertools import chain
-import os
-import json
+import warnings
+from collections import OrderedDict
 
-import numpy as np
+from .dataloader import LanguageProcessing
+from .context import FieldContext, VocabContext
+from .vocab import GeneralVocab, PretrainedVocab
+from .tokenizer import PretrainedTokenizer
+from .field import Sentence
 
-# from .._utils.unordered_hash import UnorderedSha256
-from .._utils.file_utils import get_resource_file_path
-from .._utils import hooks
-from .dataloader import LanguageProcessingBase
-from ..metric import MetricChain, AccuracyMetric
-
+if False: # for type check # pylint: disable=using-constant-test
+	from ..metric import MetricChain #pylint: disable=unused-import
 
 # pylint: disable=W0223
-class SentenceClassification(LanguageProcessingBase):
+class SentenceClassification(LanguageProcessing):
 	r"""Base class for sentence classification datasets. This is an abstract class.
 
-	Arguments:{ARGUMENTS}
+	Arguments:{LanguageProcessing.FILE_ID_DOCS}
+		{LanguageProcessing.TOKENIZER_DOCS}
+		{LanguageProcessing.MAX_SENT_LENGTH_DOCS}
+		{LanguageProcessing.CONVERT_TO_LOWER_LETTER_DOCS}
+		{LanguageProcessing.MIN_FREQUENT_VOCAB_TIMES_DOCS}
+		{LanguageProcessing.MIN_RARE_VOCAB_TIMES_DOCS}
+		{FIELD_DETAILS}
+		{PRETRAINED_DOCS}
 
-	Attributes:{ATTRIBUTES}
 	"""
 
-	_version = 1
+	PRETRAINED_DOCS = r"""
+			pretrained (str, optional): Using a pretrained field. If specific,
+				pretrained fields will be used instead of :class:`SentenceDefault` as the default field.
+				See :ref:`Pretrained Fields<pretrained_field_ref>` for explainations and possible values."""
 
-	ARGUMENTS = LanguageProcessingBase.ARGUMENTS
-	ATTRIBUTES = LanguageProcessingBase.ATTRIBUTES
+	# Notes: A :class:`Sentence` field must be set as default field. When invoking :meth:`__init__` of :class:`SentenceClassification`,
+	# the default field, which may be reset in subclass, is set as self.fields['train']['sent'].
 
-	def get_batch(self, key, indexes):
+	_version = 3
+
+	def __init__(self, file_id: str,
+				 tokenizer=None,
+				 max_sent_length=None,
+				 convert_to_lower_letter=None,
+				 min_frequent_vocab_times=None,
+				 min_rare_vocab_times=None,
+				 fields=None,
+				 pretrained=None):
+		self._pretrained = pretrained
+
+		if pretrained is None:
+			if fields is None:
+				fields = OrderedDict([('sent', 'SentenceDefault'), ('label', 'DenseLabel')])
+			with FieldContext.set_parameters(tokenizer=tokenizer,
+											 max_sent_length=max_sent_length,
+											 convert_to_lower_letter=convert_to_lower_letter):
+				with VocabContext.set_parameters(min_rare_vocab_times=min_rare_vocab_times,
+												 min_frequent_vocab_times=min_frequent_vocab_times):
+					super().__init__(file_id, fields)
+		elif pretrained == 'gpt2' or pretrained == 'bert':
+			if fields is None:
+				fields = OrderedDict([('sent', Sentence.get_pretrained_class(pretrained).__name__), ('label', 'DenseLabel')])
+			if not isinstance(tokenizer, PretrainedTokenizer):
+				raise ValueError("tokenize should be loaded first if you want a %s dataloader" % (pretrained))
+			vocab = PretrainedVocab(tokenizer.tokenizer)
+			with FieldContext.set_parameters(tokenizer=tokenizer,
+											 vocab=vocab,
+											 max_sent_length=max_sent_length,
+											 convert_to_lower_letter=convert_to_lower_letter):
+				super().__init__(file_id, fields)
+		else:
+			raise ValueError("No pretrained name %s" % pretrained)
+
+		self.set_default_field('train', 'sent')
+
+		if pretrained == 'gpt2' or pretrained == 'bert':
+			# check whether SentenceGPT2 or SentenceBERT is used.
+			for set_name, set_fields in self.fields.items():
+				for field_name, field in set_fields.items():
+					if isinstance(field, Sentence) and not isinstance(field, Sentence.get_pretrained_class(pretrained)):
+						warnings.warn("If you want to use a %s sentence_classification, you'd better use %s instead of %s."
+									  % (pretrained, Sentence.get_pretrained_class(pretrained).__name__, type(field).__name__))
+
+	def get_batch(self, set_name, indexes):
 		'''Get a batch of specified `indexes`.
 
 		Arguments:
-			key (str): must be contained in `key_name`
+			set_name (str): must be contained in `key_name`
 			indexes (list): a list of specified indexes
 
 		Returns:
@@ -68,23 +120,7 @@ class SentenceClassification(LanguageProcessingBase):
 					]),
 			}
 		'''
-		if key not in self.key_name:
-			raise ValueError("No set named %s." % key)
-		res = {}
-		batch_size = len(indexes)
-		res["sent_length"] = np.array( \
-			list(map(lambda i: len(self.data[key]['sent'][i]), indexes)), dtype=int)
-		res_sent = res["sent"] = np.zeros( \
-			(batch_size, np.max(res["sent_length"])), dtype=int)
-		res["label"] = np.zeros(batch_size, dtype=int)
-		for i, j in enumerate(indexes):
-			sentence = self.data[key]['sent'][j]
-			res["sent"][i, :len(sentence)] = sentence
-			res["label"][i] = self.data[key]['label'][j]
-
-		res["sent_allvocabs"] = res_sent.copy()
-		res_sent[res_sent >= self.valid_vocab_len] = self.unk_id
-		return res
+		return super().get_batch(set_name, indexes)
 
 	def get_metric(self, prediction_key="prediction"):
 		'''Get metrics for accuracy. In other words, this function
@@ -101,6 +137,7 @@ class SentenceClassification(LanguageProcessingBase):
 		Returns:
 			A :class:`.metric.MetricChain` object.
 		'''
+		from ..metric import MetricChain, AccuracyMetric
 		metric = MetricChain()
 		metric.add_metric(AccuracyMetric(self, \
 										 label_key='label', \
@@ -113,15 +150,14 @@ class SST(SentenceClassification):
 
 	Arguments:
 			file_id (str): a str indicates the source of SST dataset.
-			file_type (str): a str indicates the type of SST dataset. Default: "SST"
-			valid_vocab_times (int): A cut-off threshold of valid tokens. All tokens appear
-					not less than `min_vocab_times` in **training set** will be marked as valid words.
+			min_frequent_vocab_times (int): A cut-off threshold of valid tokens. All tokens appear
+					not less than `min_frequent_vocab_times` in **training set** will be marked as frequent words.
 					Default: 10.
 			max_sent_length (int): All sentences longer than `max_sent_length` will be shortened
 					to first `max_sent_length` tokens. Default: 50.
-			invalid_vocab_times (int):  A cut-off threshold of invalid tokens. All tokens appear
-					not less than `invalid_vocab_times` in the **whole dataset** (except valid words) will be
-					marked as invalid words. Otherwise, they are unknown words, both in training or
+			min_rare_vocab_times (int):  A cut-off threshold of invalid tokens. All tokens appear
+					not less than `min_rare_vocab_times` in the **whole dataset** (except valid words) will be
+					marked as rare words. Otherwise, they are unknown words, both in training or
 					testing stages. Default: 0 (No unknown words).
 
 	Refer to :class:`.SentenceClassification` for attributes and methods.
@@ -133,39 +169,13 @@ class SST(SentenceClassification):
 
 	'''
 
-	@hooks.hook_dataloader
-	def __init__(self, file_id, min_vocab_times=10, \
-				 max_sent_length=50, invalid_vocab_times=0):
-		self._file_id = file_id
-		self._file_path = get_resource_file_path(file_id)
-		self._min_vocab_times = min_vocab_times
-		self._max_sent_length = max_sent_length
-		self._invalid_vocab_times = invalid_vocab_times
-		super(SST, self).__init__()
-
-	def _load_data(self):
-		r'''Loading dataset, invoked by `LanguageProcessingBase.__init__`
-		'''
-		vocab_list, valid_vocab_len, data, data_size = \
-			super()._general_load_data(self._file_path,
-									[['sent', 'Sentence']],
-									self._min_vocab_times,
-									self._max_sent_length,
-									None,
-									self._invalid_vocab_times)
-		for key in self.key_name:
-			with open(os.path.join(self._file_path, key + '_labels.json'), 'r', encoding='utf-8') as fp:
-				data[key]['label'] = json.load(fp)
-		return vocab_list, valid_vocab_len, data, data_size
-
-	def tokenize(self, sentence):
-		r'''Convert sentence(str) to list of token(str)
-
-		Arguments:
-			sentence (str)
-
-		Returns:
-			sent (list): list of token(str)
-		'''
-		# return [x.split(' ')[-1].lower() for x in sentence if x != '']
-		return super().tokenize(sentence, True, 'space')
+	def __init__(self, file_id, min_frequent_vocab_times=10, \
+				 max_sent_length=50, convert_to_lower_letter=True, \
+				 min_rare_vocab_times=0, tokenizer='space', pretrained=None):
+		super().__init__(file_id,
+						 tokenizer=tokenizer,
+						 max_sent_length=max_sent_length,
+						 convert_to_lower_letter=convert_to_lower_letter,
+						 min_frequent_vocab_times=min_frequent_vocab_times,
+						 min_rare_vocab_times=min_rare_vocab_times,
+						 pretrained=pretrained)

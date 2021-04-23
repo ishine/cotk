@@ -12,6 +12,21 @@ BUILDDIR      = build
 help:
 	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
+public:
+	@cd meta && python update_doc.py -D public && cd ..
+	@$(SPHINXBUILD) -M html "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
+
+internal:
+	@cd meta && python update_doc.py -D internal && cd ..
+	@$(SPHINXBUILD) -M html "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
+
+checkpublic:
+	@cd meta && python update_doc.py --check -D public && cd ..
+
+public_only_source:
+	@cd meta && python update_doc.py -D public --only_source && cd ..
+	@$(SPHINXBUILD) -M html "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
+
 .PHONY: help Makefile
 
 # Catch-all target: route all unknown targets to Sphinx using the new

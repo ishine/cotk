@@ -2,8 +2,9 @@ r"""
 Containing some classes and functions about accuracy evaluating results of models.
 """
 import numpy as np
-from .._utils import hooks
 from .metric import MetricBase
+from ..dataloader import LanguageProcessing
+from typing import Dict, List, Any, Union
 
 class AccuracyMetric(MetricBase):
 	'''Metric for calculating accuracy.
@@ -34,11 +35,10 @@ class AccuracyMetric(MetricBase):
 	'''
 
 	_name = 'AccuracyMetric'
-	_version = 1
+	_version = 2
 
-	@hooks.hook_metric
-	def __init__(self, dataloader,\
-			label_key="label", prediction_key="prediction"):
+	def __init__(self, dataloader: Union["LanguageProcessing", "Sentence", "Session"],\
+			label_key: str="label", prediction_key: str="prediction"):
 		super().__init__(self._name, self._version)
 		self.dataloader = dataloader
 		self.label_key = label_key
@@ -46,11 +46,11 @@ class AccuracyMetric(MetricBase):
 		self.refs = []
 		self.hyps = []
 
-	def forward(self, data):
+	def forward(self, data: Dict[str, Any]):
 		'''Processing a batch of data.
 
 		Arguments:
-			data (dict): A dict at least contains the following keys:
+			data (Dict[str, Any]): A dict at least contains the following keys:
 
 				{MetricBase.LABEL_ARGUMENTS}
 				{MetricBase.PREDICTION_ARGUMENTS}
@@ -67,13 +67,12 @@ class AccuracyMetric(MetricBase):
 		if len(data[self.prediction_key]) != len(data[self.label_key]):
 			raise ValueError("Batch num is not matched.")
 
-		self._hash_relevant_data(data[self.label_key])
+		self._hash_unordered_list(data[self.label_key])
 
-	@hooks.hook_metric_close
-	def close(self):
+	def close(self) -> Dict[str, Any]:
 		'''
 		Returns:
-			(dict): Return a dict which contains
+			(Dict[str, Any]): Return a dict which contains
 
 			* **accuracy**: accuracy value.
 			* **accuracy hashvalue**: hash value for accuracy metric, same hash value stands

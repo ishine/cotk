@@ -1,6 +1,7 @@
-r"""
+"""
 Containing some recorders.
 """
+from typing import List, Dict, Any, Union
 import numpy as np
 from .metric import MetricBase
 
@@ -9,9 +10,9 @@ class SingleTurnDialogRecorder(MetricBase):
 
 	Arguments:
 		{MetricBase.DATALOADER_ARGUMENTS}
-		post_allvocabs_key (str): The key of dialog posts with :ref:`allvocabs <vocab_ref>`.
+		post_allvocabs_key (str, optional): The key of dialog posts with :ref:`allvocabs <vocabulary_ref>`.
 			Default: ``post_allvocabs``.
-		resp_allvocabs_key (str): The key of dialog responses with :ref:`allvocabs <vocab_ref>`.
+		resp_allvocabs_key (str, optional): The key of dialog responses with :ref:`allvocabs <vocabulary_ref>`.
 			Default: ``resp_allvocabs``.
 		{MetricBase.GEN_KEY_ARGUMENTS}
 
@@ -27,26 +28,27 @@ class SingleTurnDialogRecorder(MetricBase):
 		...     resp_allvocabs_key=resp_allvocabs_key,
 		...     gen_key=gen_key)
 		>>> data = {
-		...     post_allvocabs_key: [[2, 10, 64, 851, 3], [2, 10, 48, 851, 3]],
-		...     # post_allvocabs_key: [["<go>", "I", "like", "python", "<eos>"], ["<go>", "I", "use", "python", "<eos>"]],
+		...     post_allvocabs_key: [[2, 4, 64, 739, 3, 0], [2, 4, 50, 739, 378, 3]],
+		...     # post_allvocabs_key: [["<go>", "I", "like", "python", "<eos>", "<pad>"], ["<go>", "I", "use", "python", "most", "<eos>"]],
 		...
-		...	    resp_allvocabs_key: [[2, 10, 1214, 479, 3], [2, 851, 17, 2451, 3]],
+		...	    resp_allvocabs_key: [[2, 4, 1193, 445, 3], [2, 739, 15, 2173, 3]],
 		...	    # resp_allvocabs_key: [["<go>", "I", "prefer", "java", "<eos>"], ["<go>", "python", "is", "excellent", "<eos>"]],
 		...
-		...     gen_key: [[10, 64, 2019, 3], [851, 17, 4124, 3]],
-		...     # gen_key: [["I", "like", "PHP", "<eos>"], ["python", "is", "powerful", "<eos>"]]
+		...     gen_key: [[4, 64, 388], [739, 15, 3820, 3]],
+		...     # gen_key: [["I", "like", "PHP"], ["python", "is", "powerful", "<eos>"]]
 		... }
-		>>> metric.forword(data)
+		>>> metric.forward(data)
 		>>> metric.close()
-		{'post': [['I', 'like', 'python'], ['I', 'use', 'python']],
- 		 'resp': [['I', 'prefer', 'java'], ['python', 'is', 'excellent']],
- 		 'gen': [['I', 'like', 'PHP'], ['python', 'is', 'powerful']]}
+		{'post': ['i like python', 'i use python most'],
+ 		 'resp': ['i prefer java', 'python is excellent'],
+ 		 'gen':  ['i like php', 'python is powerful']}
 	'''
 
 	_name = 'SingleTurnDialogRecorder'
-	_version = 1
-	def __init__(self, dataloader, post_allvocabs_key="post_allvocabs", \
-			resp_allvocabs_key="resp_allvocabs", gen_key="gen"):
+	_version = 2
+	def __init__(self, dataloader: Union["LanguageProcessing", "Sentence", "Session"], \
+			post_allvocabs_key: str = "post_allvocabs", \
+			resp_allvocabs_key: str = "resp_allvocabs", gen_key: str = "gen"):
 		super().__init__(self._name, self._version)
 		self.dataloader = dataloader
 		self.post_allvocabs_key = post_allvocabs_key
@@ -56,7 +58,7 @@ class SingleTurnDialogRecorder(MetricBase):
 		self.resp_list = []
 		self.gen_list = []
 
-	def forward(self, data):
+	def forward(self, data: Dict[str, Any]):
 		'''Processing a batch of data.
 
 		Arguments:
@@ -71,9 +73,9 @@ class SingleTurnDialogRecorder(MetricBase):
 					>>> # all_vocab_list = ["<pad>", "<unk>", "<go>", "<eos>", "I", "have",
 					>>> #   "been", "to", "China"]
 					>>> data = {
-					...	    post_allvocabs_key: [[2,4,3], [2,5,6,3]],
-					...	    resp_allvocabs_key: [[2,5,4,3], [2,6,3]],
-					...	    gen_key: [[6,7,8,3], [4,5,3]]
+					...	    post_allvocabs_key: [[2,4,3,0], [2,5,6,3]],
+					...	    resp_allvocabs_key: [[2,5,4,3], [2,6,3,0]],
+					...	    gen_key: [[6,7,8], [4,5,3]]
 					... }
 		'''
 		super().forward(data)
@@ -91,14 +93,12 @@ class SingleTurnDialogRecorder(MetricBase):
 		if len(post_allvocabs) != len(resp_allvocabs) or len(resp_allvocabs) != len(gen):
 			raise ValueError("Batch num is not matched.")
 		for i, post_sen in enumerate(post_allvocabs):
-			self.post_list.append(self.dataloader.convert_ids_to_tokens(post_sen[1:]))
-			self.resp_list.append(self.dataloader.convert_ids_to_tokens(resp_allvocabs[i][1:]))
-			self.gen_list.append(self.dataloader.convert_ids_to_tokens(gen[i]))
+			self.post_list.append(self.dataloader.convert_ids_to_sentence(post_sen[1:]))
+			self.resp_list.append(self.dataloader.convert_ids_to_sentence(resp_allvocabs[i][1:]))
+			self.gen_list.append(self.dataloader.convert_ids_to_sentence(gen[i]))
 
-	def close(self):
-		'''
-		Returns:
-			(dict): Return a dict which contains
+	def close(self) -> Dict[str, Any]:
+		'''Return a dict which contains
 
 			* **post**: a list of post sentences. A jagged 2-d array of int.
 			  Size:``[batch_size, ~sent_length]``, where "~" means different
@@ -109,6 +109,8 @@ class SingleTurnDialogRecorder(MetricBase):
 			* **gen**: A list of generated sentences. A jagged 2-d array of int.
 			  Size:``[batch_size, ~sent_length]``, where "~" means different
 			  sizes in this dimension is allowed.
+
+			All sentences do not contain special tokens like ``<eos>``.
 		'''
 		res = super().close()
 		res.update({"post": self.post_list, "resp": self.resp_list, "gen": self.gen_list})
@@ -118,9 +120,9 @@ class MultiTurnDialogRecorder(MetricBase):
 	'''A metric-like class for recording generated sentences and references.
 
 	Arguments:
-		{MetricBase.DATALOADER_ARGUMENTS}
-		multi_turn_reference_allvocabs_key (str): The key of dialog references with
-			:ref:`allvocabs <vocab_ref>`. Default: ``multi_turn_ref_allvocabs``.
+		{MetricBase.MULTI_TURN_DATALOADER_ARGUMENTS}
+		multi_turn_reference_allvocabs_key (str, optional): The key of dialog references with \
+			:ref:`allvocabs <vocabulary_ref>`. Default: ``multi_turn_ref_allvocabs``.
 		{MetricBase.MULTI_TURN_GEN_KEY_ARGUMENTS}
 		{MetricBase.MULTI_TURN_LENGTH_KEY_ARGUMENTS}
 
@@ -132,35 +134,35 @@ class MultiTurnDialogRecorder(MetricBase):
 		>>> dl = cotk.dataloader.UbuntuCorpus('resources://Ubuntu_small')
 		>>> metric = cotk.metric.MultiTurnDialogRecorder(dl,
 		...     multi_turn_reference_allvocabs_key=multi_turn_reference_allvocabs_key,
-		...     multi_turn_gen_key＝multi_turn_gen_key,
+		...     multi_turn_gen_key=multi_turn_gen_key,
 		...     turn_len_key=turn_len_key)
 		>>> data = {
-		...	    multi_turn_reference_allvocabs_key: [[[2, 10, 64, 851, 3], [2, 10, 64, 479, 3]], [[2, 10, 64, 279, 1460, 3]]],
-		...     # multi_turn_reference_allvocabs_key = [[["<go>", "I", "like", "python", "<eos>"], ["<go>", "I", "like", "java", "<eos>"]],
-		...     # 	[["<go>", "I", "like", "machine", "learning", "<eos>"]]]
+		...	    multi_turn_reference_allvocabs_key: [[[2, 4, 64, 739], [2, 4, 64, 445, 3]], [[4, 64, 283, 1436, 3]]],
+		...     # multi_turn_reference_allvocabs_key = [[["<go>", "I", "like", "python"], ["<go>", "I", "like", "java", "<eos>"]],
+		...     # 	[["I", "like", "machine", "learning", "<eos>"]]]
 		...
 		...	    turn_len_key: [2, 1],
 		...     # turn_len_key: [len(multi_turn_reference_allvocabs_key[0]), len(multi_turn_reference_allvocabs_key[1])]
 		...
-		...	    multi_turn_gen_key: [[[851, 17, 2451, 3], [2019, 17, 393, 3]], [[10, 64, 34058, 805, 2601, 3]]]
-		...     # multi_turn_gen_key = [[["python", "is", "excellent", "<eos>"], ["PHP", "is", "best", "<eos>"]],
+		...	    multi_turn_gen_key: [[[739, 15, 2173, 3, 0, 0], [2, 388, 15, 387, 3, 0]], [[4, 64, 27937, 738, 2399, 3]]]
+		...     # multi_turn_gen_key = [[["python", "is", "excellent", "<eos>", "<pad>, "<pad>"], ["<go>", "PHP", "is", "best", "<eos>", "<pad>"]],
 		...     # 	[["I", "like", "natural", "language", "processing", "<eos>"]]]
 		... }
-		>>> metric.forword(data)
+		>>> metric.forward(data)
 		>>> metric.close()
-		{'reference': [[['I', 'like', 'python'], ['I', 'like', 'java']],
-		 [['I', 'like', 'machine', 'learning']]],
-		 'gen': [[['python', 'is', 'excellent'],
-		 ['PHP', 'is', 'best']],
-		 [['I', 'like', 'natural', 'language', 'processing']]]}
+		{'reference': [['I like python', 'I like java'],
+		 ['I like machine learning']],
+		 'gen': [['python is excellent',
+		 'PHP is best'],
+		 ['I like natural language processing']]}
 
 	'''
 	_name = 'MultiTurnDialogRecorder'
-	_version = 1
-	def __init__(self, dataloader,
-			multi_turn_reference_allvocabs_key="multi_turn_ref_allvocabs", \
-			multi_turn_gen_key="multi_turn_gen", \
-			turn_len_key="turn_length"):
+	_version = 2
+	def __init__(self, dataloader: Union["LanguageProcessing", "Session"],
+			multi_turn_reference_allvocabs_key: str = "multi_turn_ref_allvocabs", \
+			multi_turn_gen_key: str = "multi_turn_gen", \
+			turn_len_key: str = "turn_length"):
 		super().__init__(self._name, self._version)
 		self.dataloader = dataloader
 		self.multi_turn_reference_allvocabs_key = multi_turn_reference_allvocabs_key
@@ -170,7 +172,7 @@ class MultiTurnDialogRecorder(MetricBase):
 		self.reference_list = []
 		self.gen_list = []
 
-	def forward(self, data):
+	def forward(self, data: Dict[str, Any]):
 		'''Processing a batch of data.
 
 		Arguments:
@@ -209,18 +211,17 @@ class MultiTurnDialogRecorder(MetricBase):
 
 		for i, _ in enumerate(reference_allvocabs):
 			self.reference_list.append(self.dataloader.convert_multi_turn_ids_to_tokens( \
-				np.array(reference_allvocabs[i]), turn_length=turn_length[i], ignore_first_token=True))
+				reference_allvocabs[i], remove_special=True))
 			self.gen_list.append(self.dataloader.convert_multi_turn_ids_to_tokens( \
-				np.array(gen[i]), turn_length=turn_length[i]))
-
+				gen[i], remove_special=True))
+			self.reference_list[-1] = [" ".join(toks) for toks in self.reference_list[-1]]
+			self.gen_list[-1] = [" ".join(toks) for toks in self.gen_list[-1]]
 			if len(self.reference_list[-1]) != len(self.gen_list[-1]):
 				raise ValueError("Reference turn num %d != gen turn num %d." % \
 						(len(self.reference_list[-1]), len(self.gen_list[-1])))
 
-	def close(self):
-		'''
-		Returns:
-			(dict): Return a dict which contains
+	def close(self) -> Dict[str, Any]:
+		'''Return a dict which contains
 
 			* **reference**: a list of response sentences. A jagged 3-d array of int.
 			  Size:``[batch_size, ~turn_length, ~sent_length]``, where "~" means different
@@ -228,6 +229,8 @@ class MultiTurnDialogRecorder(MetricBase):
 			* **gen**: a list of generated sentences. A jagged 3-d array of int.
 			  Size:``[batch_size, ~turn_length, ~sent_length]``, where "~" means different
 			  sizes in this dimension is allowed.
+
+			All sentences do not contain special tokens like ``<eos>``.
 		'''
 		res = super().close()
 		res.update({"reference": self.reference_list, "gen": self.gen_list})
@@ -246,22 +249,22 @@ class LanguageGenerationRecorder(MetricBase):
 		>>> dl = cotk.dataloader.UbuntuCorpus('resources://Ubuntu_small')
 		>>> metric = cotk.metric.LanguageGenerationRecorder(dl, gen_key=gen_key)
 		>>> data = {
-		...	    gen_key: [[2, 10, 64, 851, 3], [2, 10, 48, 851, 3]],
+		...	    gen_key: [[2, 4, 64, 739, 3], [2, 4, 50, 739, 3]],
 		...	    # gen_key: [["<go>", "I", "like", "python", "<eos>"], ["<go>", "I", "use", "python", "<eos>"]],
 		... }
-		>>> metric.forword(data)
+		>>> metric.forward(data)
 		>>> metric.close()
-		{'gen': [['<go>', 'I', 'like', 'python'], ['<go>', 'I', 'use', 'python']]}
+		{'gen': ['I like python', 'I use python']}
 	'''
 	_name = 'LanguageGenerationRecorder'
-	_version = 1
-	def __init__(self, dataloader, gen_key="gen"):
+	_version = 2
+	def __init__(self, dataloader: Union["LanguageProcessing", "Sentence", "Session"], gen_key: str = "gen"):
 		super().__init__(self._name, self._version)
 		self.dataloader = dataloader
 		self.gen_key = gen_key
 		self.gen_list = []
 
-	def forward(self, data):
+	def forward(self, data: Dict[str, Any]):
 		'''Processing a batch of data.
 
 		Arguments:
@@ -284,16 +287,16 @@ class LanguageGenerationRecorder(MetricBase):
 			raise TypeError("Unknown type for gen")
 
 		for sen in gen:
-			self.gen_list.append(self.dataloader.convert_ids_to_tokens(sen))
+			self.gen_list.append(self.dataloader.convert_ids_to_sentence(sen))
 
-	def close(self):
-		'''
-		Returns:
-			(dict): Return a dict which contains
+	def close(self) -> Dict[str, Any]:
+		'''Return a dict which contains
 
 			* **gen**: a list of generated sentences. A jagged 2-d array of int.
 			  Size:``[batch_size, ~sent_length]``, where "~" means different
 			  sizes in this dimension is allowed.
+
+			All sentences do not contain special tokens like ``<eos>``.
 		'''
 		res = super().close()
 		res.update({"gen": self.gen_list})

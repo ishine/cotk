@@ -14,6 +14,8 @@ def setup_module():
 	random.seed(0)
 	np.random.seed(0)
 
+#pytestmark = pytest.mark.skip("all tests still WIP")
+
 class TestMetricChain():
 	def test_init(self):
 		mc = MetricChain()
@@ -23,13 +25,16 @@ class TestMetricChain():
 		with pytest.raises(TypeError):
 			mc.add_metric([1, 2, 3])
 
-	def test_close1(self):
+	@pytest.mark.parametrize('data_loader', ['dataloader', 'field'])
+	def test_close1(self, data_loader):
 		dataloader = FakeMultiDataloader()
 		data = dataloader.get_data(reference_key='reference_key', reference_len_key='reference_len_key', \
 								   turn_len_key='turn_len_key', gen_prob_key='gen_prob_key', \
 								   gen_key='gen_key', context_key='context_key')
+		if data_loader == 'field':
+			dataloader = dataloader.get_default_field()
 		pm = MultiTurnPerplexityMetric(dataloader, 'reference_key', 'reference_len_key', 'gen_prob_key', \
-									   invalid_vocab=True, full_check=True)
+									   generate_rare_vocab=True, full_check=True)
 		perplexity = TestMultiTurnPerplexityMetric().get_perplexity( \
 			data, dataloader, True, 'reference_key', 'reference_len_key', 'gen_prob_key')
 
